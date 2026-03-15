@@ -1,13 +1,14 @@
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, 
-    REST, Routes, SlashCommandBuilder, StringSelectMenuBuilder 
+    REST, Routes, SlashCommandBuilder, StringSelectMenuBuilder,
+    MessageFlags 
 } = require('discord.js');
 const express = require('express');
 
 // --- SERVEUR KEEP-ALIVE RENDER ---
 const app = express();
-app.get('/', (req, res) => res.send('Nae Bot Premium est en ligne ! 🚀'));
+app.get('/', (req, res) => res.send('Nae Bot Ultra est en ligne ! 🚀'));
 app.listen(process.env.PORT || 10000);
 
 const client = new Client({
@@ -17,184 +18,170 @@ const client = new Client({
     ]
 });
 
-// --- CONFIGURATION ESTHÉTIQUE ---
-const COULEUR_PRINCIPALE = '#5865F2'; // Bleu Discord
-const COULEUR_SUCCES = '#2ECC71';     // Vert
-const COULEUR_ERREUR = '#E74C3C';     // Rouge
+// --- BASES DE DONNÉES TEMPORAIRES (RESET AU REDÉMARRAGE RENDER) ---
+const xpMap = new Map();
+const moneyMap = new Map();
+const spamMap = new Map();
 
-// --- COMMANDES SLASH ---
+// --- CONFIGURATION ---
+const COULEUR = '#5865F2';
+
+// --- DÉFINITION DES COMMANDES ---
 const commands = [
-    new SlashCommandBuilder().setName('ban').setDescription('🔨 Bannir un membre')
-        .addUserOption(o => o.setName('cible').setDescription('Le membre à bannir').setRequired(true))
-        .addStringOption(o => o.setName('raison').setDescription('Raison du ban')),
+    // MODÉRATION
+    new SlashCommandBuilder().setName('ban').setDescription('🔨 Bannir un membre').addUserOption(o => o.setName('cible').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('raison').setDescription('Raison')),
+    new SlashCommandBuilder().setName('clear').setDescription('🧹 Nettoyer le chat').addIntegerOption(o => o.setName('nombre').setDescription('1-100').setRequired(true)),
+    new SlashCommandBuilder().setName('kick').setDescription('👢 Expulser un membre').addUserOption(o => o.setName('cible').setDescription('Membre').setRequired(true)),
     
-    new SlashCommandBuilder().setName('clear').setDescription('🧹 Nettoyer le chat')
-        .addIntegerOption(o => o.setName('nombre').setDescription('Nombre de messages (1-100)').setRequired(true)),
-
-    new SlashCommandBuilder().setName('setup-ticket').setDescription('📩 Installer le système de tickets pro'),
+    // SYSTÈMES PRO
+    new SlashCommandBuilder().setName('setup-ticket').setDescription('📩 Installer le centre de support'),
+    new SlashCommandBuilder().setName('verify-setup').setDescription('🤖 Installer le bouton de vérification'),
     
-    new SlashCommandBuilder().setName('server-info').setDescription('📊 Afficher les stats du serveur'),
-    
-    new SlashCommandBuilder().setName('avatar').setDescription('🖼️ Voir l\'avatar d\'un membre')
-        .addUserOption(o => o.setName('cible').setDescription('Le membre')),
+    // ÉCONOMIE & NIVEAUX
+    new SlashCommandBuilder().setName('balance').setDescription('💰 Voir ton argent'),
+    new SlashCommandBuilder().setName('rank').setDescription('📈 Voir ton niveau XP'),
+    new SlashCommandBuilder().setName('daily').setDescription('🎁 Récupérer ton argent quotidien'),
 
-    new SlashCommandBuilder().setName('8ball').setDescription('🔮 Pose une question à la boule magique')
-        .addStringOption(o => o.setName('question').setDescription('Ta question').setRequired(true)),
-
-    new SlashCommandBuilder().setName('pile-ou-face').setDescription('🪙 Lancer une pièce'),
+    // UTILITAIRE & FUN
+    new SlashCommandBuilder().setName('server-info').setDescription('📊 Statistiques du serveur'),
+    new SlashCommandBuilder().setName('user-info').setDescription('👤 Infos sur un membre').addUserOption(o => o.setName('cible').setDescription('Le membre')),
+    new SlashCommandBuilder().setName('8ball').setDescription('🔮 Question à la boule magique').addStringOption(o => o.setName('question').setRequired(true).setDescription('Ta question')),
+    new SlashCommandBuilder().setName('pile-ou-face').setDescription('🪙 Tenter sa chance'),
 ].map(c => c.toJSON());
 
 // --- INITIALISATION ---
 client.once('ready', async () => {
-    console.log(`✅ Connecté en tant que ${client.user.tag}`);
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('✨ Commandes synchronisées avec succès !');
+        console.log(`✅ Nae est prêt : ${client.user.tag}`);
     } catch (e) { console.error(e); }
 });
 
-// --- BIENVENUE ESTHÉTIQUE ---
+// --- BIENVENUE & ANTI-RAID ---
 client.on('guildMemberAdd', async (member) => {
-    // Anti-Raid : Compte de moins de 24h
-    if (Date.now() - member.user.createdTimestamp < 86400000) {
-        return member.kick("Anti-Raid : Compte trop récent (moins de 24h).").catch(() => {});
+    // Anti-Raid : Compte créé il y a moins de 48h
+    if (Date.now() - member.user.createdTimestamp < 172800000) {
+        return member.kick("Sécurité : Compte trop récent (moins de 48h).").catch(() => {});
     }
 
     const channel = member.guild.channels.cache.find(c => c.name === 'bienvenue');
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setTitle(`✨ Bienvenue sur ${member.guild.name} !`)
-        .setDescription(`Ravi de t'accueillir **${member.user.username}** !\nPense à lire le règlement pour éviter les ennuis.`)
-        .addFields({ name: '📊 Membres', value: `${member.guild.memberCount}`, inline: true })
-        .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-        .setColor(COULEUR_PRINCIPALE)
-        .setImage('https://i.imgur.com/8PnV9os.png') // Image de bienvenue (optionnel)
-        .setFooter({ text: 'Nae Bot • Sécurité Active' });
-
-    channel.send({ content: `Bienvenue ${member} !`, embeds: [embed] });
+    if (channel) {
+        const welcome = new EmbedBuilder()
+            .setTitle(`✨ Nouveau membre !`)
+            .setDescription(`Bienvenue ${member} sur **${member.guild.name}** !\nUtilise le salon de vérification pour accéder au serveur.`)
+            .setColor(COULEUR).setThumbnail(member.user.displayAvatarURL());
+        channel.send({ embeds: [welcome] });
+    }
 });
 
-// --- ANTI-SPAM & ANTI-INSULTES ---
-const spamMap = new Map();
-const motsInterdits = ['insulte1', 'insulte2', 'discord.gg/']; // À compléter
-
+// --- SYSTÈME XP & ÉCONOMIE & ANTI-SPAM ---
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Anti-Insultes
-    if (motsInterdits.some(w => message.content.toLowerCase().includes(w))) {
-        await message.delete().catch(() => {});
-        return message.channel.send(`🚫 **${message.author.username}**, merci de rester poli.`).then(m => setTimeout(() => m.delete(), 3000));
-    }
+    const userId = message.author.id;
 
-    // Anti-Spam
-    if (!spamMap.has(message.author.id)) {
-        spamMap.set(message.author.id, { count: 1 });
-        setTimeout(() => spamMap.delete(message.author.id), 5000);
-    } else {
-        const data = spamMap.get(message.author.id);
-        data.count++;
-        if (data.count > 5) {
-            await message.member.timeout(60000, 'Anti-Spam');
-            message.channel.send(`⚠️ **${message.author.username}** a été mute 1 minute (Spam).`);
-        }
+    // 1. Système XP
+    let userXP = xpMap.get(userId) || 0;
+    xpMap.set(userId, userXP + Math.floor(Math.random() * 5) + 5);
+
+    // 2. Anti-Spam (Mute 1min si > 5 msg en 5s)
+    let userSpam = spamMap.get(userId) || { count: 0, timer: null };
+    userSpam.count++;
+    if (userSpam.count > 5) {
+        await message.member.timeout(60000, "Spam automatique");
+        message.channel.send(`⚠️ ${message.author}, calme-toi un peu ! (Mute 1min)`);
+        userSpam.count = 0;
     }
+    spamMap.set(userId, userSpam);
+    setTimeout(() => spamMap.delete(userId), 5000);
 });
 
-// --- GESTION DES INTERACTIONS ---
+// --- INTERACTIONS (COMMANDES & BOUTONS) ---
 client.on('interactionCreate', async (interaction) => {
-    
-    // 1. COMMANDES SLASH
+    const { commandName, options, guild, member, user } = interaction;
+
     if (interaction.isChatInputCommand()) {
-        const { commandName, options, guild, member } = interaction;
-
-        if (commandName === 'ban') {
-            if (!member.permissions.has(PermissionFlagsBits.BanMembers)) return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
-            const cible = options.getMember('cible');
-            const raison = options.getString('raison') || 'Aucune raison';
-            await cible.ban({ reason: raison });
-            await interaction.reply({ content: `🔨 **${cible.user.tag}** a été banni.\nRaison : ${raison}`, ephemeral: true });
+        // --- ÉCONOMIE ---
+        if (commandName === 'daily') {
+            let lastDaily = moneyMap.get(user.id) || 0;
+            moneyMap.set(user.id, lastDaily + 500);
+            await interaction.reply(`🎁 Tu as reçu **500 coins** ! Ton nouveau solde : ${lastDaily + 500} 💰`);
         }
 
-        if (commandName === 'clear') {
-            const num = options.getInteger('nombre');
-            await interaction.channel.bulkDelete(num, true);
-            await interaction.reply({ content: `🧹 **${num}** messages ont été balayés !`, ephemeral: true });
+        if (commandName === 'balance') {
+            const bal = moneyMap.get(user.id) || 0;
+            await interaction.reply(`💰 Tu possèdes actuellement **${bal} coins**.`);
         }
 
-        if (commandName === 'server-info') {
-            const embed = new EmbedBuilder()
-                .setTitle(`📊 Stats de ${guild.name}`)
-                .addFields(
-                    { name: '👑 Propriétaire', value: `<@${guild.ownerId}>`, inline: true },
-                    { name: '👥 Membres', value: `${guild.memberCount}`, inline: true },
-                    { name: '📅 Création', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>`, inline: true }
-                )
-                .setThumbnail(guild.iconURL())
-                .setColor(COULEUR_PRINCIPALE);
-            await interaction.reply({ embeds: [embed] });
+        // --- NIVEAUX ---
+        if (commandName === 'rank') {
+            const xp = xpMap.get(user.id) || 0;
+            const level = Math.floor(0.1 * Math.sqrt(xp));
+            await interaction.reply(`📈 **Niveau :** ${level} | **XP :** ${xp}`);
+        }
+
+        // --- SYSTÈMES SETUP ---
+        if (commandName === 'verify-setup') {
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('verify_btn').setLabel('Se vérifier').setStyle(ButtonStyle.Success).setEmoji('✅')
+            );
+            await interaction.reply({ content: "Cliquez sur le bouton pour prouver que vous n'êtes pas un robot :", components: [row] });
         }
 
         if (commandName === 'setup-ticket') {
-            const embed = new EmbedBuilder()
-                .setTitle("📩 Centre d'Assistance Nae")
-                .setDescription("Besoin d'aide ou envie de rejoindre l'équipe ?\nChoisissez une catégorie ci-dessous.")
-                .setColor(COULEUR_PRINCIPALE)
-                .setFooter({ text: 'Réponse rapide garantie' });
-
             const menu = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('menu_ticket')
-                    .setPlaceholder('Sélectionnez un sujet...')
-                    .addOptions([
-                        { label: 'Devenir Modérateur', value: 'tk_modo', emoji: '👮', description: 'Postuler pour le staff' },
-                        { label: 'Faire un Signalement', value: 'tk_report', emoji: '🚩', description: 'Signaler un joueur' },
-                        { label: 'Aide Technique', value: 'tk_help', emoji: '🛠️', description: 'Problème serveur' }
-                    ])
+                new StringSelectMenuBuilder().setCustomId('tk_menu').setPlaceholder('Pourquoi ouvrez-vous un ticket ?')
+                .addOptions([
+                    { label: 'Devenir Modérateur', value: 'tk_modo', emoji: '👮' },
+                    { label: 'Signaler un joueur', value: 'tk_report', emoji: '🚩' },
+                    { label: 'Autre demande', value: 'tk_other', emoji: '❓' }
+                ])
             );
-            await interaction.reply({ embeds: [embed], components: [menu] });
+            await interaction.reply({ content: "📩 **Centre de Support Nae**", components: [menu] });
         }
 
-        // Mini-Jeux
-        if (commandName === '8ball') {
-            const reponses = ["Oui", "Non", "C'est possible", "Je ne sais pas", "Demande à ton chat", "Peut-être"];
-            const r = reponses[Math.floor(Math.random() * reponses.length)];
-            await interaction.reply(`🔮 **Question :** ${options.getString('question')}\n✨ **Boule Magique :** ${r}`);
+        // --- MODÉRATION ---
+        if (commandName === 'clear') {
+            const n = options.getInteger('nombre');
+            await interaction.channel.bulkDelete(n, true);
+            await interaction.reply({ content: `🧹 ${n} messages nettoyés.`, flags: [MessageFlags.Ephemeral] });
         }
     }
 
-    // 2. GESTION DES TICKETS (MENU)
-    if (interaction.isStringSelectMenu() && interaction.customId === 'menu_ticket') {
-        const val = interaction.values[0];
-        const label = val === 'tk_modo' ? 'MODO' : val === 'tk_report' ? 'SIGNALEMENT' : 'AIDE';
+    // --- GESTION DES BOUTONS & MENUS ---
+    if (interaction.isButton()) {
+        if (interaction.customId === 'verify_btn') {
+            const role = guild.roles.cache.find(r => r.name === 'Vérifié' || r.name === 'Membre');
+            if (role) {
+                await member.roles.add(role);
+                await interaction.reply({ content: "✅ Vous êtes maintenant vérifié !", flags: [MessageFlags.Ephemeral] });
+            } else {
+                await interaction.reply({ content: "❌ Erreur : Role 'Vérifié' introuvable.", flags: [MessageFlags.Ephemeral] });
+            }
+        }
+        
+        if (interaction.customId === 'close_tk') {
+            await interaction.reply("🔒 Fermeture du ticket...");
+            setTimeout(() => interaction.channel.delete(), 3000);
+        }
+    }
 
-        const channel = await interaction.guild.channels.create({
-            name: `${label}-${interaction.user.username}`,
+    if (interaction.isStringSelectMenu() && interaction.customId === 'tk_menu') {
+        const val = interaction.values[0];
+        const ticketChan = await guild.channels.create({
+            name: `${val}-${user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
-                { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         });
-
-        const embedTk = new EmbedBuilder()
-            .setTitle(`🎫 Ticket ouvert : ${label}`)
-            .setDescription(`Bonjour ${interaction.user}, explique-nous tout ici.\nUn membre du staff va s'occuper de toi.`)
-            .setColor(COULEUR_SUCCES);
-
-        const btnClose = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('close_tk').setLabel('Fermer').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+        const closeBtn = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_tk').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
         );
-
-        await channel.send({ embeds: [embedTk], components: [btnClose] });
-        await interaction.reply({ content: `✅ Ticket créé : ${channel}`, ephemeral: true });
-    }
-
-    if (interaction.isButton() && interaction.customId === 'close_tk') {
-        await interaction.reply("🔒 Fermeture du ticket dans 5 secondes...");
-        setTimeout(() => interaction.channel.delete(), 5000);
+        await ticketChan.send({ content: `Bienvenue ${user}, le staff va vous aider pour : **${val}**`, components: [closeBtn] });
+        await interaction.reply({ content: `✅ Ton ticket est ici : ${ticketChan}`, flags: [MessageFlags.Ephemeral] });
     }
 });
 
