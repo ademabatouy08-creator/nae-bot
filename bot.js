@@ -76,6 +76,71 @@ client.on('messageCreate', (m) => {
         db.money.set(m.author.id, bal + 10);
     }
 });
+// --- SYSTÈME DE LOGS D'AUDIT (CYBER-SÉCURITÉ) ---
+
+// 1. Logs de Connexion (Qui arrive ?)
+client.on('guildMemberAdd', async (member) => {
+    const embed = new EmbedBuilder()
+        .setTitle('📥 Nouveau Membre')
+        .setColor('#2ECC71')
+        .setThumbnail(member.user.displayAvatarURL())
+        .addFields(
+            { name: 'Utilisateur', value: `${member.user.tag}`, inline: true },
+            { name: 'ID', value: `\`${member.id}\``, inline: true },
+            { name: 'Âge du compte', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: false }
+        )
+        .setTimestamp();
+    sendLog(member.guild, embed);
+});
+
+// 2. Logs de Déconnexion (Qui part ?)
+client.on('guildMemberRemove', async (member) => {
+    const embed = new EmbedBuilder()
+        .setTitle('📤 Départ Membre')
+        .setColor('#E74C3C')
+        .setDescription(`**${member.user.tag}** a quitté le serveur.`)
+        .setTimestamp();
+    sendLog(member.guild, embed);
+});
+
+// 3. Logs de Suppression (Anti-Ghosting)
+client.on('messageDelete', async (message) => {
+    if (message.author?.bot || !message.guild) return;
+    const embed = new EmbedBuilder()
+        .setTitle('🗑️ Message Supprimé')
+        .setColor('#FF9500')
+        .addFields(
+            { name: 'Auteur', value: `${message.author.tag}`, inline: true },
+            { name: 'Salon', value: `${message.channel}`, inline: true },
+            { name: 'Contenu', value: message.content || "*Fichier/Image*" }
+        )
+        .setFooter({ text: `ID Message: ${message.id}` })
+        .setTimestamp();
+    sendLog(message.guild, embed);
+});
+
+// 4. Logs de Modification (Traçabilité)
+client.on('messageUpdate', async (oldMsg, newMsg) => {
+    if (oldMsg.author?.bot || oldMsg.content === newMsg.content) return;
+    const embed = new EmbedBuilder()
+        .setTitle('📝 Message Modifié')
+        .setColor('#F1C40F')
+        .addFields(
+            { name: 'Auteur', value: `${oldMsg.author.tag}`, inline: false },
+            { name: 'Ancien contenu', value: oldMsg.content || "*Vide*" },
+            { name: 'Nouveau contenu', value: newMsg.content || "*Vide*" }
+        )
+        .setTimestamp();
+    sendLog(oldMsg.guild, embed);
+});
+
+// --- FONCTION AUTOMATIQUE D'ENVOI ---
+async function sendLog(guild, embed) {
+    const logChannel = guild.channels.cache.find(c => c.name === 'logs-nae');
+    if (logChannel) {
+        logChannel.send({ embeds: [embed] }).catch(() => {});
+    }
+}
 
 // --- GESTION DES LOGS D'AUDIT (SUPPRESSION) ---
 client.on('messageDelete', async (m) => {
