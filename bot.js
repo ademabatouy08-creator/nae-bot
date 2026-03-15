@@ -193,7 +193,7 @@ client.on('interactionCreate', async (i) => {
             const embed = new EmbedBuilder()
                 .setTitle('🎭 Personnalisation du Profil')
                 .setDescription('Cliquez sur les boutons pour définir qui vous êtes !')
-                .setColor(COULEUR).setImage('https://i.imgur.com/vHq0L5p.png');
+                .setColor(COULEUR).setImage('https://cdn.discordapp.com/attachments/1482492955939049593/1482537494552641657/Capture_decran_2026-03-15_013244.png?ex=69b75022&is=69b5fea2&hm=629e32af5d84cfc837c4eed921800bae7d93e4075b0f63277c6776fb66e9490f&');
 
             const row1 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('role_PC').setLabel('PC').setStyle(ButtonStyle.Secondary).setEmoji('💻'),
